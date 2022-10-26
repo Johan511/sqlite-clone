@@ -25,4 +25,4 @@ clean:
 commit:
 	git add .
 	git commit -m "$(CM)"
-	git push remote origin
+	git push
