@@ -10,6 +10,7 @@ typedef enum
 {
     PREPARE_SUCCESS,
     PREPARE_UNRECOGNIZED_STATEMENT,
+    PREPARE_SYNTAX_ERROR,
 } PrepareCommandResult;
 
 typedef enum
@@ -20,7 +21,14 @@ typedef enum
 
 typedef struct
 {
+    u_int32_t id;
+    char username[COLUMN_USERNAME_SIZE];
+    char email[COLUMN_EMAIL_SIZE];
+} Row;
+typedef struct
+{
     StatementType type;
+    Row row
 } Statement;
 typedef struct
 {
@@ -77,6 +85,10 @@ PrepareCommandResult prepare_statement(InputBuffer *input_buffer, Statement *sta
     if (strncmp(input_buffer->buffer, "insert", 6) == 0)
     {
         statement->type = STATEMENT_INSERT;
+        int args_assigned = sscanf(input_buffer->buffer, "insert %d %s %s", &(statement->row.id),
+                                   &(statement->row.username), &(statement->row.email));
+        if (args_assigned < 3)
+            return PREPARE_SYNTAX_ERROR;
         return PREPARE_SUCCESS;
     }
     if (strcmp(input_buffer->buffer, "select") == 0)

@@ -2,9 +2,12 @@ CC=gcc
 OPT=-O3
 DEBUG=1
 
+INCDIR=includes
+OBJDIR=objects
 BINARY=sqlite
-OBJECTS=objects/repl.o
-INLCUDES=includes/repl.h
+SRC=src
+OBJECTS=$(OBJDIR)/repl.o
+INLCUDES=$(INCDIR)/repl.h
 
 all : $(BINARY)
 
@@ -14,8 +17,12 @@ all : $(BINARY)
 $(BINARY) : $(OBJECTS) $(INLCUDES)
 	$(CC) -o $@ $^
 
-objects/%.o : src/%.c includes/%.h
+$(OBJDIR)/%.o : $(SRC)/%.c $(INCDIR)/%.h
 	$(CC) -c -o $@ $<
 
 clean:
-	rm -rf objects/* && rm sqlite
+	rm -rf $(OBJDIR)/* && rm sqlite
+commit:
+	git add .
+	git commit -m "$(CM)"
+	git push remote origin
