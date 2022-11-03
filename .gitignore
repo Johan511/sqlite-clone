@@ -4,3 +4,4 @@
 *.out
 /objects
 sqlite
+*.db

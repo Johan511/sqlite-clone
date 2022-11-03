@@ -18,7 +18,7 @@ $(BINARY) : $(OBJECTS) $(INLCUDES)
 	$(CC) -o $@ $^
 
 $(OBJDIR)/%.o : $(SRC)/%.c $(INCDIR)/%.h
-	$(CC) -c -o $@ $<
+	$(CC) -c -g -o $@ $<
 
 clean:
 	rm -rf $(OBJDIR)/* && rm sqlite
