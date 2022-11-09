@@ -3,5 +3,5 @@
 *.exe
 *.out
 /objects
-sqlite
+sqlite*
 *.db
