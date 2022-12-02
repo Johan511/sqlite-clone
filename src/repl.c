@@ -45,15 +45,86 @@ void set_node_type(void *node, NodeType node_type)
     *(uint8_t *)(node + NODE_TYPE_OFFSET) = (uint8_t)node_type;
 }
 
+void set_node_root(void *node, bool is_root)
+{
+    uint8_t value = is_root;
+    *(uint8_t *)(node + IS_ROOT_OFFSET) = value;
+}
+
 void initialize_leaf_node(void *node)
 {
     set_node_type(node, NODE_LEAF);
+    set_node_root(node, false);
     *leaf_node_num_cells(node) = 0;
 }
+
+uint32_t get_unused_page_num(Pager *pager) { return pager->num_pages; }
 
 void print_row(Row *row)
 {
     printf("(%d, %s, %s)\n", row->id, row->username, row->email);
+}
+
+uint32_t *internal_node_num_keys(void *node)
+{
+    node + INTERNAL_NODE_NUM_KEYS_OFFSET;
+}
+
+uint32_t *internal_node_right_child(void *node)
+{
+    node + INTERNAL_NODE_RIGHT_CHILD_OFFSET;
+}
+
+uint32_t *internal_node_cell(void *node, uint32_t cell_num)
+{
+    return node + INTERNAL_NODE_HEAD_SIZE + (cell_num) * (INTERNAL_NODE_CELL_SIZE);
+}
+
+uint32_t *internal_node_child(void *node, uint32_t child_num)
+{
+    uint32_t num_keys = *internal_node_num_keys(node);
+    // keys are 0, 1, 2 => key num is 3
+    // child nums are 0, 1, 2, 3 => 3 is right most node
+    if (child_num > num_keys)
+    {
+        printf("Tried to access child number (%d) > num_keys (%d)", child_num, num_keys);
+        exit(EXIT_FAILURE);
+    }
+    else if (child_num == num_keys)
+    {
+        return internal_node_right_child(node);
+    }
+    else
+    {
+        return internal_node_cell(node, child_num);
+    }
+}
+
+uint32_t *internal_node_key(void *node, uint32_t key_num)
+{
+    return internal_node_cell(node, key_num) + INTERNAL_NODE_CHILD_SIZE;
+}
+
+uint32_t get_node_max_key(void *node)
+{
+    switch (get_node_type(node))
+    {
+    case NODE_INTERNAL:
+        return *internal_node_key(node, *(internal_node_num_keys(node) - 1));
+        break;
+
+    case NODE_LEAF:
+        return *leaf_node_key(node, *(leaf_node_num_cells(node) - 1));
+        break;
+    default:
+        printf("UNIDENTIFIED NODE TYPE");
+        exit(EXIT_FAILURE);
+    }
+}
+
+bool is_node_root(void *node)
+{
+    return *(bool *)(node + IS_ROOT_OFFSET);
 }
 
 Page *get_page(Pager *pager, uint32_t page_num)
@@ -279,6 +350,7 @@ Table *db_open(const char *filename)
         // if db file empty
         void *root_node = get_page(pager, 0);
         initialize_leaf_node(root_node);
+        set_node_root(root_node, true);
     }
     return table;
 }
@@ -345,6 +417,94 @@ PrepareCommandResult prepare_statement(InputBuffer *input_buffer, Statement *sta
     return PREPARE_UNRECOGNIZED_STATEMENT;
 }
 
+uint32_t get_unused_pages(Pager *pager)
+{
+    return pager->num_pages;
+}
+
+void initialize_internal_node(void *node)
+{
+    set_node_type(node, NODE_INTERNAL);
+    set_node_root(node, false);
+    *(internal_node_num_keys(node)) = 0;
+}
+
+// right child is the old child
+void create_new_root(Table *table, uint32_t right_child_page_num)
+{
+    // definitions
+    Pager *pager = table->pager;
+    void *root = get_page(pager, table->root_page_num);
+    void *right_child = get_page(pager, right_child_page_num);
+    uint32_t left_child_page_num = get_unused_page_num(pager);
+    void *left_child = get_page(pager, left_child_page_num);
+
+    // left child has data from old root
+    memcpy(left_child, root, PAGE_SIZE);
+    set_node_root(left_child, false);
+
+    initialize_internal_node(root);
+    set_node_root(root, true);
+    *internal_node_num_keys(root) = 1;
+    *internal_node_child(root, 0);
+    uint32_t left_child_max_key = get_node_max_key(left_child);
+    *internal_node_key(root, 0) = left_child_max_key;
+    *internal_node_right_child(root) = right_child_page_num;
+}
+
+void leaf_node_split_and_insert(Cursor *cursor, uint32_t key, Row *value)
+{
+    // creating 2 nodes
+    void *old_node = get_page(cursor->table->pager, cursor->page_num);
+    uint32_t new_page_num = get_unused_page_num(cursor->table->pager);
+    void *new_node = get_page(cursor->table->pager, new_page_num);
+    initialize_leaf_node(new_node);
+
+    // copy half the rows to new node
+
+    for (int i = LEAF_NODE_MAX_CELLS; i >= 0; i--)
+    {
+        void *destination_node = NULL;
+        if (i >= LEAF_NODE_LEFT_SPLIT_COUNT)
+        {
+            destination_node = new_node;
+        }
+        else
+        {
+            destination_node = old_node;
+        }
+        uint32_t index_within_node = i % LEAF_NODE_LEFT_SPLIT_COUNT;
+        void *destination = leaf_node_cell(destination_node, index_within_node);
+
+        if (i == cursor->cell_num)
+        {
+            // row to be added => needs to be serialised
+            serialize_row(value, destination);
+        }
+        else if (i < cursor->cell_num)
+        {
+            // rows before it can be copied directly
+            memcpy(destination, leaf_node_cell(old_node, i), LEAF_NODE_CELL_SIZE);
+        }
+        else
+        {
+            // rows after it need to be copied with i - 1 (becuase there was a new row inserted)
+            memcpy(destination, leaf_node_cell(old_node, i - 1), LEAF_NODE_CELL_SIZE);
+        }
+    }
+    *(leaf_node_num_cells(old_node)) = LEAF_NODE_LEFT_SPLIT_COUNT;
+    *(leaf_node_num_cells(new_node)) = LEAF_NODE_RIGHT_SPLIT_COUNT;
+    if (is_node_root(old_node) == true)
+    {
+        return create_new_root(cursor->table, new_page_num);
+    }
+    else
+    {
+        printf("NEED TO IMPLEMENT UPDATING PARENT");
+        exit(EXIT_FAILURE);
+    }
+}
+
 void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value)
 {
     Pager *pager = cursor->table->pager;
@@ -352,8 +512,7 @@ void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value)
     uint32_t num_cells = *(leaf_node_num_cells(node));
     if (num_cells >= LEAF_NODE_MAX_CELLS)
     {
-        printf("Need to implement splitting a leaf node.\n");
-        exit(EXIT_FAILURE);
+        leaf_node_split_and_insert(cursor, key, value);
     }
     for (uint32_t i = num_cells; i > cursor->cell_num; i--)
     {
@@ -369,10 +528,6 @@ ExecuteResult execute_insert(Statement *statement, Table *table)
     void *node = get_page(table->pager, table->root_page_num);
     // we search from the root
     uint32_t num_cells = *(leaf_node_num_cells(node));
-    if (num_cells >= LEAF_NODE_MAX_CELLS)
-    {
-        return EXECUTE_TABLE_FULL;
-    }
     Row *row_to_insert = &(statement->row);
     uint32_t key_to_insert = row_to_insert->id;
     Cursor *cursor = table_find(table, key_to_insert);
@@ -405,13 +560,14 @@ ExecuteResult execute_select(Statement *statement, Table *table)
 
 void execute_statement(Statement *statement, Table *table)
 {
+    ExecuteResult execute_result;
     switch (statement->type)
     {
     case (STATEMENT_INSERT):
-        execute_insert(statement, table);
+        execute_result = execute_insert(statement, table);
         break;
     case (STATEMENT_SELECT):
-        execute_select(statement, table);
+        execute_result = execute_select(statement, table);
         break;
     }
 }
