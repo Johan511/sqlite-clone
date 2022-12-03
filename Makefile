@@ -26,14 +26,19 @@ $(OBJDIR)/%.o : $(SRC)/%.c $(INCDIR)/%.h
 	$(CC) -c -g -o $@ $<
 
 $(TEST_INPUT_FILE) : $(TEST_FILES)
-	$(PYTHON_INTR) $(TEST_FILES)
+	cd test ; \
+	$(PYTHON_INTR) ../$(TEST_FILES) ;\
+	cd ..
 
 test: $(BINARY) $(TEST_FILES) $(TEST_INPUT_FILE)
-	make all && ./sqlite $(DB_FILE) < $(TEST_INPUT_FILE)
-
+	make all 
+	./sqlite $(DB_FILE) < $(TEST_INPUT_FILE)
+	rm $(TEST_FILES)
 clean:
 	rm -rf $(OBJDIR)/* && rm sqlite
 commit:
 	git add .
 	git commit -m "$(CM)"
 	git push
+xxx: $(BINARY)
+	cd ~/cs && echo $(PWD)

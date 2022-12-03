@@ -1,4 +1,6 @@
 #include "../includes/repl.h"
+// after creating root node, serialize row at the end writes over input buffer which gives seg fault during next input
+// also error of updating parent node comes when root is split
 
 void serialize_row(Row *source, void *destination)
 {
@@ -67,12 +69,12 @@ void print_row(Row *row)
 
 uint32_t *internal_node_num_keys(void *node)
 {
-    node + INTERNAL_NODE_NUM_KEYS_OFFSET;
+    return node + INTERNAL_NODE_NUM_KEYS_OFFSET;
 }
 
 uint32_t *internal_node_right_child(void *node)
 {
-    node + INTERNAL_NODE_RIGHT_CHILD_OFFSET;
+    return node + INTERNAL_NODE_RIGHT_CHILD_OFFSET;
 }
 
 uint32_t *internal_node_cell(void *node, uint32_t cell_num)
@@ -306,17 +308,6 @@ Row *row_slot(Table *table, uint32_t row_num)
     return (Row *)page + row_num;
 }
 
-// Table *new_table()
-// {
-//     Table *table = (Table *)malloc(sizeof(Table));
-//     table->num_rows = 0;
-//     for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
-//     {
-//         table->pages[i] = NULL;
-//     }
-//     return table;
-// }
-
 Pager *pager_open(const char *filename)
 {
     int file_descriptor = open(filename, O_RDWR | O_CREAT, S_IWUSR | S_IRUSR);
@@ -367,6 +358,7 @@ InputBuffer *new_input_buffer()
 void read_input(InputBuffer *input_buffer)
 {
     ssize_t bytes_read = getline(&(input_buffer->buffer), &(input_buffer->buffer_length), stdin);
+    printf("bytes read : %d\n", bytes_read);
     if (bytes_read <= 0)
     {
         printf("Error reading input\n");
@@ -513,11 +505,17 @@ void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value)
     if (num_cells >= LEAF_NODE_MAX_CELLS)
     {
         leaf_node_split_and_insert(cursor, key, value);
+        return;
     }
-    for (uint32_t i = num_cells; i > cursor->cell_num; i--)
-    {
-        memcpy(leaf_node_cell(node, i), leaf_node_cell(node, i - 1), LEAF_NODE_CELL_SIZE);
-    }
+    // if (cursor->cell_num < num_cells)
+    // {
+        // Make room for new cell
+        for (uint32_t i = num_cells; i > cursor->cell_num; i--)
+        {
+            memcpy(leaf_node_cell(node, i), leaf_node_cell(node, i - 1),
+                   LEAF_NODE_CELL_SIZE);
+        }
+    // }
     *(leaf_node_num_cells(node)) += 1;
     *(leaf_node_key(node, cursor->cell_num)) = key;
     serialize_row(value, leaf_node_value(node, cursor->cell_num));
@@ -534,10 +532,10 @@ ExecuteResult execute_insert(Statement *statement, Table *table)
     if (cursor->cell_num < num_cells)
     {
         uint32_t key_at_index = *leaf_node_key(node, cursor->cell_num);
-        if (key_at_index == key_to_insert)
-        {
-            return EXECUTE_DUPLICATE_KEY;
-        }
+        // if (key_at_index == key_to_insert)
+        // {
+        //     return EXECUTE_DUPLICATE_KEY;
+        // }
     }
     // serialize_row(row_to_insert, cursor_value(cursor));
     leaf_node_insert(cursor, row_to_insert->id, row_to_insert);
