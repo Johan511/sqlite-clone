@@ -264,6 +264,41 @@ Cursor *leaf_node_find(Table *table, uint32_t page_num, uint32_t key)
     return cursor;
 }
 
+Cursor *internal_node_find(Table *table, u_int32_t page_num, uint32_t key)
+{
+    void *node = get_page(table->pager, page_num);
+    uint32_t num_keys = *internal_node_num_keys(node);
+
+    // bin search
+    uint32_t min_index = 0;
+    uint32_t max_index = num_keys;
+
+    while (min_index != max_index)
+    {
+        uint32_t mid_index = (min_index + max_index) / 2;
+        uint32_t mid_key = *(internal_node_key(node, mid_index));
+        if (mid_key >= key)
+        {
+            max_index = mid_index;
+        }
+        else
+        {
+            min_index = mid_index + 1;
+        }
+    }
+    uint32_t child_index = min_index;
+    void *child_node = get_page(table->pager, page_num);
+    switch (get_node_type(child_node))
+    {
+    case NODE_LEAF:
+        return leaf_node_find(table, child_index, key);
+        break;
+    case NODE_INTERNAL:
+        return internal_node_find(table, child_index, key);
+        break;
+    }
+}
+
 Cursor *table_find(Table *table, uint32_t key)
 {
     uint32_t root_page_num = table->root_page_num;
@@ -274,8 +309,7 @@ Cursor *table_find(Table *table, uint32_t key)
     }
     else
     {
-        printf("NEED TO IMPLEMENT SEARCHING INTERNAL NODES TO REACH THE LEAF\n");
-        exit(EXIT_FAILURE);
+        return internal_node_find(table, root_page_num, key);
     }
 }
 
@@ -509,12 +543,12 @@ void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value)
     }
     // if (cursor->cell_num < num_cells)
     // {
-        // Make room for new cell
-        for (uint32_t i = num_cells; i > cursor->cell_num; i--)
-        {
-            memcpy(leaf_node_cell(node, i), leaf_node_cell(node, i - 1),
-                   LEAF_NODE_CELL_SIZE);
-        }
+    // Make room for new cell
+    for (uint32_t i = num_cells; i > cursor->cell_num; i--)
+    {
+        memcpy(leaf_node_cell(node, i), leaf_node_cell(node, i - 1),
+               LEAF_NODE_CELL_SIZE);
+    }
     // }
     *(leaf_node_num_cells(node)) += 1;
     *(leaf_node_key(node, cursor->cell_num)) = key;
